@@ -1,0 +1,113 @@
+---
+title: "The area under the curve"
+output: pdf_document
+date: '2022-06-06'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+```
+
+## The basic growth model
+
+Let $L(t)$ the length of a fish at time $t$ then the model of von Bertalanffy can be written as following:
+
+$$ L(t) = L_{\infty}(1 - e^{-k(t - t_{0})})$$
+
+where $L(t)$ is the expected length at time $t$, $L_{\infty}$ the asymptotic average length, $k$ is the growth rate and $t_0$ is the age when the length is expected to be zero.
+
+```{r vbgf, echo = FALSE}
+vbgf <- function(t, linf, k, t0){
+  linf*(1 - exp(-k*(t-t0)))
+}
+
+k = 0.52
+t0 = -0.47
+linf = 275.2
+```
+
+```{r plot, echo=FALSE, fig.width=4, fig.height=3, fig.align='center'}
+df = data.frame(len =vbgf(t = seq(-0.47,10,0.1), k = k, t0 = t0, linf = linf), age = seq(-0.47,10,0.1))
+ggplot(data = df, aes(x = age, y = len)) + geom_line() + theme_bw() +
+  scale_y_continuous(limits=c(0,300), expand = c(0, 0))+
+  scale_x_continuous(expand = c(0, 0)) + xlab('Age (year)') + ylab('Length (mm)')
+```
+
+The area under the growth curve $A$, is calculated using the definite integral of the growth function with limits $t_1$ and $t_2$ :
+
+
+$$ \int_{t_{1}}^{t_{2}} L_{\infty}(1 - e^{-k(t - t_{0})}) \,dt \Rightarrow \\ $$
+$$ \int_{t_{1}}^{t_{2}} L_{\infty} - L_{\infty}e^{-k(t - t_{0})} \,dt \Rightarrow \\ $$
+$$ \int_{t_{1}}^{t_{2}} L_{\infty} \,dt - L_{\infty} \int_{t_{1}}^{t_{2}} e^{-k(t - t_{0})} \,dt \Rightarrow\\ $$
+$$ L_{\infty}t + c_{1} \bigg\rvert_{t_{1}}^{t_2} - L_{\infty} \frac{e^{-k(t - t_{0})}}{k} + c_{2} \bigg\rvert_{t_{1}}^{t_2} $$
+
+Substituting $t_{1}$ and $t_{2}$:
+
+$$ A = L_{\infty}(t_{2} - t_{1}) - \frac{L_{\infty}}{k}(e^{-k(t_{2} - t_{0})} - e^{-k(t_{1} - t_{0})}) $$
+```{r areaPlot, echo=FALSE, fig.width=4, fig.height=3, fig.align='center'}
+t11 = 0;t12 = vbgf(t = 0, k = k, t0 = t0, linf = linf)
+t21 = 9;t22 = vbgf(t = 9, k = k, t0 = t0, linf = linf)
+
+df = data.frame(len =vbgf(t = seq(-0.47,10,0.1), k = k, t0 = t0, linf = linf), age = seq(-0.47,10,0.1))
+ggplot(data = df, aes(x = age, y = len)) + geom_line() + theme_bw() +
+  scale_y_continuous(limits=c(0,300), expand = c(0, 0))+
+  scale_x_continuous(expand = c(0, 0), breaks = c(0:10), labels = c('t1',as.character(1:8),'t2','10')) +
+  xlab('Age (year)') + ylab('Length (mm)') +
+  geom_segment(x = 0, y = 0, xend = 0, yend = vbgf(t = 0, k = k, t0 = t0, linf = linf), linetype = 'dotted') +
+  geom_segment(x = 9, y = 0, xend = 9, yend = vbgf(t = 9, k = k, t0 = t0, linf = linf), linetype = 'dotted') +
+  geom_area(mapping = aes(x = ifelse(age>0 & age< 9 , age, 0)), fill = "red", alpha =0.3)
+```
+
+Dimensions of the area will be $length \times age$ or, in S.I., $L\cdot T$. In case $t_{1} = 0$ the equation simplifies to:
+
+$$ L_{\infty}t_{2} - \frac{L_{\infty}}{k}(e^{-k(t_{2} - t_{0})} - e^{t_{0}}) $$
+
+## Draft calculation from fishbase
+
+```{r}
+library(rfishbase)
+
+area <- function(linf, k, t0, t1, t2){
+  linf*(t2 - t2) - (linf/k)*(exp(-k*(t2-t0)) - exp(t1 - t0))
+}
+
+growth <- rfishbase::popgrowth()
+growth <- growth[!is.na(growth$K),]
+growth <- growth[!is.na(growth$tmax),]
+
+growth$area <- area(linf = growth$Loo, k = growth$K, t0 = growth$to, t1 = 0, t2 = growth$tmax)
+
+boxplot(growth$area)
+```
+
+Remove the outliers using interquantile range $$IQR = Q3 - Q1$$ and outliers:
+$$\bigg\{ x | x<(Q1 - 1.5 \cdot IQR) \quad \& \quad x> (Q3 + 1.5 \cdot IQR) \bigg\}$$
+
+```{r}
+iqr <- function(x) {
+  quantile(x, .75) - quantile(x, .25)
+}
+
+growth <-growth[!is.na(growth$area),]
+Q1 <- quantile(growth$area, .25)
+Q3 <- quantile(growth$area, .75)
+# 
+IQR <- iqr(growth$area)
+no_outliers <- subset(growth, growth$area > (Q1 - 1.5*IQR) & growth$area < (Q3 + 1.5*IQR))
+boxplot(no_outliers$area)
+```
+
+Plotting versus $k$ and $L_{\infty}$:
+
+```{r plot3, echo=FALSE, fig.height=3}
+
+ggplot(data = no_outliers, aes(x = Loo, y = area)) + geom_point() + theme_bw()
+ggplot(data = no_outliers, aes(x = K, y = area)) + geom_point() + theme_bw()
+
+```
+
+
+## Visiting physics
+
+In physics, or more specific in kinematics, absement is a measure with units $m\cdot s$ and is defined as the sustained displacement of an object from its initial position. It's calculated as the integral of displacement. For example, opening the gate of a gate valve (of rectangular cross section) by 1 mm for 10 seconds yields the same absement of 10 mm·s as opening it by 5 mm for 2 seconds (Example from fluid mechanics).
